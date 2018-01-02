@@ -7,7 +7,6 @@
 #     mv /bin/rm /bin/rm.old
 #     cp /path/to/trash.sh /bin/rm
 # Known BUG:
-#     The recycle function can cause a two - fold cycle and redirects the error output to /dev/null
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
@@ -15,20 +14,22 @@ export PATH
 user=`whoami`
 timestamp=`date +%Y%m%d%H%M`
 recycle_bin=/data/trash
-parameter=`echo $@ | sed -e 's/-rf//g' -e 's#/ \+# #g' -e 's#/$##g'`
-disk_availability=`df -m | grep -w / | awk '{print $4}'`
-file_size=`du -sm ${parameter} | awk '{ sum += $1 }; END { print sum }'`	#This step may be slow.
-dir_name=`ls -d ${parameter} | xargs -I {} dirname {} | xargs`
-base_name=`ls -d ${parameter} | xargs -I {} basename {} | xargs`
+parameter=`echo $@ | sed -e 's#-[drfiIv]\+\s*##g' -e 's#/ \+# #g' -e 's#/$##g' | grep -w -v '/|/etc|/boot/|opt|/var/|/usr'`
+disk_availability=`df -m /data | grep "/" | awk '{print $4}'`
+file_size=`du -sm "${parameter}" | awk '{ sum += $1 }; END { print sum }'`  #This step may be slow.
 
 ##### function #####
 recycle() {
-    for f in ${base_name}
+    for file in "${parameter}"
         do
-            for d in ${dir_name}
-                do
-                    mv $d/$f ${recycle_bin}/$f-${user}-${timestamp}
-                done 2>/dev/null
+            dir_name=`dirname "${file}"`
+            base_name=`basename "${file}"`
+            mv "${file}" ${recycle_bin}/"${base_name}"-${user}-${timestamp}.${RANDOM}
+        if [ $? -eq 0 ] ; then 
+            echo "${timestamp}, rm_file: ${file}, file_initial_path: $(pwd)." | tee -a ${recycle_bin}/.history
+        else
+            echo "Error,please check the file you want to delete!"
+        fi
         done
 }
 
@@ -36,13 +37,31 @@ disk() {
     if [[ ${file_size} -gt ${disk_availability} ]] ; then
         read -t 30 -p "Please confirm that you want to delete this file:(yes/no) " judge
         if [ "${judge}" == "yes" ] ; then
-            /bin/rm.old -rf ${parameter}
+            /bin/rm.old -rf "${parameter}"
         else
             exit 0
         fi
     fi
 }
 
+build() {
+    if [ ! -d ${recycle_bin} ] ; then
+        mkdir -p ${recycle_bin}
+        chmod -R 1777 ${recycle_bin}
+        touch ${recycle_bin}/.history
+        chmod -R 1777 ${recycle_bin}/.history
+    fi
+}
+
+trash_init() {
+    if [ `/bin/rm.old --version | grep "rm (GNU coreutils)" | wc -l` -eq 0 ] ; then
+        echo "Your RM command is not a system with your own."
+        exit 1
+    fi
+}
+
 ##### action #####
+trash_init
+build
 disk
 recycle
